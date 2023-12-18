@@ -80,9 +80,8 @@ class StateActionReturnDataset(Dataset):
 
 if args.training_option != 0:
     args.num_steps = args.num_steps // 2
-    args.epochs *= 2
     print("training_option : ", args.training_option)
-    print("num_steps, epochs changed")
+    print("num_steps changed")
 
 obss, actions, returns, done_idxs, rtgs, timesteps = create_dataset(args.num_buffers, args.num_steps, args.game, args.data_dir_prefix, args.trajectories_per_buffer)
 

@@ -79,7 +79,7 @@ class Trainer:
         # torch.save(raw_model.state_dict(), self.config.ckpt_path)
         torch.save(raw_model.state_dict(), self.config.save_path + '/' + str(epoch) + '.pth')
 
-    def _image_aug_cutout(self, x, training_option, min_cut=10,max_cut=30):
+    def _image_aug_cutout(self, x, y, r, t, training_option, min_cut=10,max_cut=30):
 
         """
         args:
@@ -89,7 +89,42 @@ class Trainer:
         """
         
         if training_option == 0:
-            return x
+            return x, y, r, t
+        else:
+            
+            B, T, CHW = x.shape
+            #rand_idx = torch.randint(0, B - 1, (B // 2,))  # torch.Size([64])
+
+            #x_og = x[rand_idx]  # B//2 x T x CHW    #torch.Size([64, 30, 28224])
+            #imgs = x_og.reshape((B//2)*T, 4, 84, 84).numpy()  # (1920, 4, 84, 84)
+            imgs = x.reshape(B*T, 4, 84, 84).numpy()
+
+            n, c, h, w = imgs.shape
+            w1 = np.random.randint(min_cut, max_cut, n)
+            h1 = np.random.randint(min_cut, max_cut, n)
+            
+            cutouts = np.empty((n, c, h, w), dtype=imgs.dtype)
+            for i, (img, w11, h11) in enumerate(zip(imgs, w1, h1)):
+                cut_img = img.copy()
+
+                rnd = torch.rand((1,))
+                if rnd > 0.5:
+                    cut_img[:, h11:h11 + h11, w11:w11 + w11] = 0
+                #print(img[:, h11:h11 + h11, w11:w11 + w11].shape)
+                cutouts[i] = cut_img
+            
+            cutouts = torch.from_numpy(cutouts)
+            #cutouts = cutouts.reshape(B//2, T, CHW)
+            #cutouts = torch.cat([x_og, cutouts], dim=0)  # torch.Size([128, 30, 28224])
+            cutouts = cutouts.reshape(B, T, CHW)
+            x = torch.cat([x, cutouts], dim=0)
+            y = torch.cat([y, y], dim=0)
+            r = torch.cat([r, r], dim=0)
+            t = torch.cat([t, t], dim=0)
+            return x, y, r, t
+
+
+        """
         elif training_option == 1:
 
             B, T, CHW = x.shape  # 128 x 30 x 28224
@@ -114,32 +149,7 @@ class Trainer:
             cutouts = torch.from_numpy(cutouts)
             cutouts = cutouts.reshape(B, T, CHW)
             return cutouts
-        elif training_option == 2:
-
-            B, T, CHW = x.shape
-            rand_idx = torch.randint(0, B - 1, (B // 2,))  # torch.Size([64])
-
-            x_og = x[rand_idx]  # B//2 x T x CHW    #torch.Size([64, 30, 28224])
-            imgs = x_og.reshape((B//2)*T, 4, 84, 84).numpy()  # (1920, 4, 84, 84)
-
-            n, c, h, w = imgs.shape
-            w1 = np.random.randint(min_cut, max_cut, n)
-            h1 = np.random.randint(min_cut, max_cut, n)
-            
-            cutouts = np.empty((n, c, h, w), dtype=imgs.dtype)
-            for i, (img, w11, h11) in enumerate(zip(imgs, w1, h1)):
-                cut_img = img.copy()
-
-                rnd = torch.rand((1,))
-                if rnd > 0.5:
-                    cut_img[:, h11:h11 + h11, w11:w11 + w11] = 0
-                #print(img[:, h11:h11 + h11, w11:w11 + w11].shape)
-                cutouts[i] = cut_img
-            
-            cutouts = torch.from_numpy(cutouts)
-            cutouts = cutouts.reshape(B//2, T, CHW)
-            cutouts = torch.cat([x_og, cutouts], dim=0)  # torch.Size([128, 30, 28224])
-            return cutouts
+        """
 
 
         
@@ -164,7 +174,7 @@ class Trainer:
             for it, (x, y, r, t) in pbar:
 
                     
-                x = self._image_aug_cutout(x, config.training_option, 10, 30)
+                x, y, r, t = self._image_aug_cutout(x, y, r, t, config.training_option, 10, 30)
 
                 # place data on the correct device
                 x = x.to(self.device)
@@ -254,7 +264,7 @@ class Trainer:
                 raise NotImplementedError()
 
             with open(self.config.save_path + '/eval_return.txt', "w") as file:
-                file.write(eval_ret)
+                file.write(str(eval_ret))
 
     def get_returns(self, ret):
         self.model.train(False)

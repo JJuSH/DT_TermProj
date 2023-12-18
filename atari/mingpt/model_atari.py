@@ -285,7 +285,7 @@ class GPT(nn.Module):
             loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         
         if self.config.training_option == 2:
-
+            
             half_batch_size = attn.shape[0] // 2
             #loss += self.config.attn_loss_ratio * torch.square(torch.sub(attn[:half_batch_size], attn[half_batch_size:])).mean()
 
