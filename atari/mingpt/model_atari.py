@@ -27,6 +27,7 @@ from torch.nn import functional as F
 logger = logging.getLogger(__name__)
 
 import numpy as np
+import pdb
 
 class GELU(nn.Module):
     def forward(self, input):
@@ -78,7 +79,7 @@ class CausalSelfAttention(nn.Module):
 
     def forward(self, x, layer_past=None):
         B, T, C = x.size()
-
+        
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         k = self.key(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -88,13 +89,13 @@ class CausalSelfAttention(nn.Module):
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         att = att.masked_fill(self.mask[:,:,:T,:T] == 0, float('-inf'))
         att = F.softmax(att, dim=-1)
-        att = self.attn_drop(att)
+        att = self.attn_drop(att)    # 128 x 8 x 90 x 90
         y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
         y = self.resid_drop(self.proj(y))
-        return y
+        return y, att
 
 class Block(nn.Module):
     """ an unassuming Transformer block """
@@ -112,9 +113,11 @@ class Block(nn.Module):
         )
 
     def forward(self, x):
-        x = x + self.attn(self.ln1(x))
+        y, att = self.attn(self.ln1(x))
+        #x = x + self.attn(self.ln1(x))
+        x = x + y
         x = x + self.mlp(self.ln2(x))
-        return x
+        return x, att
 
 class GPT(nn.Module):
     """  the full GPT language model, with a context size of block_size """
@@ -134,7 +137,8 @@ class GPT(nn.Module):
         self.drop = nn.Dropout(config.embd_pdrop)
 
         # transformer
-        self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        #self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
         # decoder head
         self.ln_f = nn.LayerNorm(config.n_embd)
         self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
@@ -256,9 +260,11 @@ class GPT(nn.Module):
         all_global_pos_emb = torch.repeat_interleave(self.global_pos_emb, batch_size, dim=0) # batch_size, traj_length, n_embd
 
         position_embeddings = torch.gather(all_global_pos_emb, 1, torch.repeat_interleave(timesteps, self.config.n_embd, dim=-1)) + self.pos_emb[:, :token_embeddings.shape[1], :]
-
+        
         x = self.drop(token_embeddings + position_embeddings)
-        x = self.blocks(x)
+        #x = self.blocks(x)
+        for block in self.blocks:
+            x, attn = block(x)
         x = self.ln_f(x)
         logits = self.head(x)
 
@@ -277,5 +283,10 @@ class GPT(nn.Module):
         loss = None
         if targets is not None:
             loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+        
+        if self.config.training_option == 2:
+            half_batch_size = attn.shape[0] // 2
+            loss += self.config.attn_loss_ratio * torch.square(torch.sub(attn[:half_batch_size], attn[half_batch_size:])).mean()
+
 
         return logits, loss

@@ -33,6 +33,8 @@ import random
 import cv2
 import torch
 from PIL import Image
+import pdb
+import os
 
 class TrainerConfig:
     # optimization parameters
@@ -64,15 +66,45 @@ class Trainer:
 
         # take over whatever gpus are on the system
         self.device = 'cpu'
+        
         if torch.cuda.is_available():
             self.device = torch.cuda.current_device()
             self.model = torch.nn.DataParallel(self.model).to(self.device)
 
-    def save_checkpoint(self):
+    def save_checkpoint(self, epoch):
         # DataParallel wrappers keep raw model object in .module attribute
         raw_model = self.model.module if hasattr(self.model, "module") else self.model
-        logger.info("saving %s", self.config.ckpt_path)
+        #logger.info("saving %s", self.config.ckpt_path)
+        logger.info("saving %s", self.config.save_path)
         # torch.save(raw_model.state_dict(), self.config.ckpt_path)
+        torch.save(raw_model.state_dict(), self.config.save_path + '/' + str(epoch) + '.pth')
+
+    def _image_aug_cutout(self, x, min_cut=10,max_cut=30):
+
+        """
+        args:
+        imgs: np.array shape (B,C,H,W)
+        min / max cut: int, min / max size of cutout 
+        returns np.array
+        """
+        B, T, CHW = x.shape
+
+        imgs = x.reshape(B*T*4, 1, 84, 84).numpy()  #frame stack에서 frame마다 같은 위치에 cutout?
+
+        n, c, h, w = imgs.shape
+        w1 = np.random.randint(min_cut, max_cut, n)
+        h1 = np.random.randint(min_cut, max_cut, n)
+        
+        cutouts = np.empty((n, c, h, w), dtype=imgs.dtype)
+        for i, (img, w11, h11) in enumerate(zip(imgs, w1, h1)):
+            cut_img = img.copy()
+            cut_img[:, h11:h11 + h11, w11:w11 + w11] = 0
+            #print(img[:, h11:h11 + h11, w11:w11 + w11].shape)
+            cutouts[i] = cut_img
+        
+        cutouts = torch.from_numpy(cutouts)
+        cutouts = cutouts.reshape(B, T, CHW)
+        return cutouts
 
     def train(self):
         model, config = self.model, self.config
@@ -80,6 +112,8 @@ class Trainer:
         optimizer = raw_model.configure_optimizers(config)
 
         def run_epoch(split, epoch_num=0):
+
+
             is_train = split == 'train'
             model.train(is_train)
             data = self.train_dataset if is_train else self.test_dataset
@@ -91,12 +125,24 @@ class Trainer:
             pbar = tqdm(enumerate(loader), total=len(loader)) if is_train else enumerate(loader)
             for it, (x, y, r, t) in pbar:
 
+                
+                if config.training_option == 1:
+                    half_batch_size = x.shape[0] // 2    # half batch size : 64
+                    x_aug = self._image_aug_cutout(x[:half_batch_size], 10, 30)  # 0 ~ 63 augmentation
+                    x[:half_batch_size] = x_aug    #  tensor copy ?
+                elif config.training_option == 2:
+                    half_batch_size = x.shape[0] // 2
+                    x_aug = self._image_aug_cutout(x[:half_batch_size], 10, 30)
+                    x[half_batch_size: ] = x_aug
+                    
+
+
                 # place data on the correct device
                 x = x.to(self.device)
                 y = y.to(self.device)
                 r = r.to(self.device)
                 t = t.to(self.device)
-
+                
                 # forward the model
                 with torch.set_grad_enabled(is_train):
                     # logits, loss = model(x, y, r)
@@ -141,6 +187,7 @@ class Trainer:
         best_return = -float('inf')
 
         self.tokens = 0 # counter used for learning rate decay
+        
 
         for epoch in range(config.max_epochs):
 
@@ -154,6 +201,7 @@ class Trainer:
             #     best_loss = test_loss
             #     self.save_checkpoint()
 
+            self.save_checkpoint(epoch)
             # -- pass in target returns
             if self.config.model_type == 'naive':
                 eval_return = self.get_returns(0)

@@ -19,6 +19,12 @@ import blosc
 import argparse
 from create_dataset import create_dataset
 
+import os
+from datetime import datetime
+from omegaconf import OmegaConf
+import pdb
+import json
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=123)
 parser.add_argument('--context_length', type=int, default=30)
@@ -31,6 +37,10 @@ parser.add_argument('--batch_size', type=int, default=128)
 # 
 parser.add_argument('--trajectories_per_buffer', type=int, default=10, help='Number of trajectories to sample from each of the buffers.')
 parser.add_argument('--data_dir_prefix', type=str, default='./dqn_replay/')
+parser.add_argument('--result_path', type=str, default='./results/')
+parser.add_argument('--training_option', type=int, default=0)
+parser.add_argument('--attn_loss_ratio', type=float, default=0.2)
+#parser.add_argument('--data_dir_prefix', type=str, default='/data/scyu/project/dt/decision-transformer/atari/datasets/')
 args = parser.parse_args()
 
 set_seed(args.seed)
@@ -65,7 +75,28 @@ class StateActionReturnDataset(Dataset):
 
         return states, actions, rtgs, timesteps
 
+if args.training_option != 0:
+    args.num_steps = args.num_steps // 2
+    args.epochs *= 2
+    print("training_option : ", args.training_option)
+    print("num_steps, epochs changed")
+
 obss, actions, returns, done_idxs, rtgs, timesteps = create_dataset(args.num_buffers, args.num_steps, args.game, args.data_dir_prefix, args.trajectories_per_buffer)
+
+
+# obss : list, len : 17002 [... (4, 84, 84) ...]
+# actions : np array, (17002,)
+# done_idxs : np array, (11,)     array([  676,  2196,  3685,  5043,  6868,  8874, 10423, 11611, 13357, 15174, 17002])
+# rtgs : np array (17002,)
+# timesteps : np array (17003,)      timesteps[676] : 676, timesteps[677] : 0
+
+
+path = args.result_path + datetime.today().strftime("%Y%m%d_%H%M")
+os.mkdir(path)
+
+with open(path + '/config.txt', 'w') as f:
+    json.dump(args.__dict__, f, indent=2)
+
 
 # set up logging
 logging.basicConfig(
@@ -77,14 +108,17 @@ logging.basicConfig(
 train_dataset = StateActionReturnDataset(obss, args.context_length*3, actions, done_idxs, rtgs, timesteps)
 
 mconf = GPTConfig(train_dataset.vocab_size, train_dataset.block_size,
-                  n_layer=6, n_head=8, n_embd=128, model_type=args.model_type, max_timestep=max(timesteps))
+                  n_layer=6, n_head=8, n_embd=128, model_type=args.model_type, max_timestep=max(timesteps),
+                  training_option=args.training_option, attn_loss_ratio=args.attn_loss_ratio)
 model = GPT(mconf)
 
 # initialize a trainer instance and kick off training
 epochs = args.epochs
 tconf = TrainerConfig(max_epochs=epochs, batch_size=args.batch_size, learning_rate=6e-4,
                       lr_decay=True, warmup_tokens=512*20, final_tokens=2*len(train_dataset)*args.context_length*3,
-                      num_workers=4, seed=args.seed, model_type=args.model_type, game=args.game, max_timestep=max(timesteps))
+                      num_workers=4, seed=args.seed, model_type=args.model_type, game=args.game, max_timestep=max(timesteps),
+                      save_path=path, training_option = args.training_option, attn_loss_ratio=args.attn_loss_ratio)
+
 trainer = Trainer(model, train_dataset, None, tconf)
 
 trainer.train()
