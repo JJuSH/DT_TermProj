@@ -79,7 +79,7 @@ class Trainer:
         # torch.save(raw_model.state_dict(), self.config.ckpt_path)
         torch.save(raw_model.state_dict(), self.config.save_path + '/' + str(epoch) + '.pth')
 
-    def _image_aug_cutout(self, x, min_cut=10,max_cut=30):
+    def _image_aug_cutout(self, x, training_option, min_cut=10,max_cut=30):
 
         """
         args:
@@ -87,24 +87,62 @@ class Trainer:
         min / max cut: int, min / max size of cutout 
         returns np.array
         """
-        B, T, CHW = x.shape
-
-        imgs = x.reshape(B*T*4, 1, 84, 84).numpy()  #frame stack에서 frame마다 같은 위치에 cutout?
-
-        n, c, h, w = imgs.shape
-        w1 = np.random.randint(min_cut, max_cut, n)
-        h1 = np.random.randint(min_cut, max_cut, n)
         
-        cutouts = np.empty((n, c, h, w), dtype=imgs.dtype)
-        for i, (img, w11, h11) in enumerate(zip(imgs, w1, h1)):
-            cut_img = img.copy()
-            cut_img[:, h11:h11 + h11, w11:w11 + w11] = 0
-            #print(img[:, h11:h11 + h11, w11:w11 + w11].shape)
-            cutouts[i] = cut_img
+        if training_option == 0:
+            return x
+        elif training_option == 1:
+
+            B, T, CHW = x.shape  # 128 x 30 x 28224
+
+            #imgs = x.reshape(B*T*4, 1, 84, 84).numpy()  #frame stack에서 frame마다 같은 위치에 cutout?
+            imgs = x.reshape(B*T, 4, 84, 84).numpy()   # 3840 x 4 x 84 x 84
+
+            n, c, h, w = imgs.shape
+            w1 = np.random.randint(min_cut, max_cut, n)
+            h1 = np.random.randint(min_cut, max_cut, n)
+            
+            cutouts = np.empty((n, c, h, w), dtype=imgs.dtype)
+            for i, (img, w11, h11) in enumerate(zip(imgs, w1, h1)):
+                cut_img = img.copy()
+
+                rnd = torch.rand((1,))
+                if rnd > 0.5:
+                    cut_img[:, h11:h11 + h11, w11:w11 + w11] = 0
+                #print(img[:, h11:h11 + h11, w11:w11 + w11].shape)
+                cutouts[i] = cut_img
+            
+            cutouts = torch.from_numpy(cutouts)
+            cutouts = cutouts.reshape(B, T, CHW)
+            return cutouts
+        elif training_option == 2:
+
+            B, T, CHW = x.shape
+            rand_idx = torch.randint(0, B - 1, (B // 2,))  # torch.Size([64])
+
+            x_og = x[rand_idx]  # B//2 x T x CHW    #torch.Size([64, 30, 28224])
+            imgs = x_og.reshape((B//2)*T, 4, 84, 84).numpy()  # (1920, 4, 84, 84)
+
+            n, c, h, w = imgs.shape
+            w1 = np.random.randint(min_cut, max_cut, n)
+            h1 = np.random.randint(min_cut, max_cut, n)
+            
+            cutouts = np.empty((n, c, h, w), dtype=imgs.dtype)
+            for i, (img, w11, h11) in enumerate(zip(imgs, w1, h1)):
+                cut_img = img.copy()
+
+                rnd = torch.rand((1,))
+                if rnd > 0.5:
+                    cut_img[:, h11:h11 + h11, w11:w11 + w11] = 0
+                #print(img[:, h11:h11 + h11, w11:w11 + w11].shape)
+                cutouts[i] = cut_img
+            
+            cutouts = torch.from_numpy(cutouts)
+            cutouts = cutouts.reshape(B//2, T, CHW)
+            cutouts = torch.cat([x_og, cutouts], dim=0)  # torch.Size([128, 30, 28224])
+            return cutouts
+
+
         
-        cutouts = torch.from_numpy(cutouts)
-        cutouts = cutouts.reshape(B, T, CHW)
-        return cutouts
 
     def train(self):
         model, config = self.model, self.config
@@ -125,17 +163,8 @@ class Trainer:
             pbar = tqdm(enumerate(loader), total=len(loader)) if is_train else enumerate(loader)
             for it, (x, y, r, t) in pbar:
 
-                
-                if config.training_option == 1:
-                    half_batch_size = x.shape[0] // 2    # half batch size : 64
-                    x_aug = self._image_aug_cutout(x[:half_batch_size], 10, 30)  # 0 ~ 63 augmentation
-                    x[:half_batch_size] = x_aug    #  tensor copy ?
-                elif config.training_option == 2:
-                    half_batch_size = x.shape[0] // 2
-                    x_aug = self._image_aug_cutout(x[:half_batch_size], 10, 30)
-                    x[half_batch_size: ] = x_aug
                     
-
+                x = self._image_aug_cutout(x, config.training_option, 10, 30)
 
                 # place data on the correct device
                 x = x.to(self.device)
@@ -188,7 +217,7 @@ class Trainer:
 
         self.tokens = 0 # counter used for learning rate decay
         
-
+        eval_ret = []
         for epoch in range(config.max_epochs):
 
             run_epoch('train', epoch_num=epoch)
@@ -200,24 +229,32 @@ class Trainer:
             # if self.config.ckpt_path is not None and good_model:
             #     best_loss = test_loss
             #     self.save_checkpoint()
-
+            
             self.save_checkpoint(epoch)
             # -- pass in target returns
             if self.config.model_type == 'naive':
                 eval_return = self.get_returns(0)
+                eval_ret.append(eval_return)
             elif self.config.model_type == 'reward_conditioned':
                 if self.config.game == 'Breakout':
                     eval_return = self.get_returns(90)
+                    eval_ret.append(eval_return)
                 elif self.config.game == 'Seaquest':
                     eval_return = self.get_returns(1150)
+                    eval_ret.append(eval_return)
                 elif self.config.game == 'Qbert':
                     eval_return = self.get_returns(14000)
+                    eval_ret.append(eval_return)
                 elif self.config.game == 'Pong':
                     eval_return = self.get_returns(20)
+                    eval_ret.append(eval_return)
                 else:
                     raise NotImplementedError()
             else:
                 raise NotImplementedError()
+
+            with open(self.config.save_path + '/eval_return.txt', "w") as file:
+                file.write(eval_ret)
 
     def get_returns(self, ret):
         self.model.train(False)

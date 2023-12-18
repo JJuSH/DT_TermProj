@@ -25,6 +25,9 @@ from omegaconf import OmegaConf
 import pdb
 import json
 
+#python run_dt_atari.py --seed 123 --context_length 30 --epochs 5 --model_type 'reward_conditioned' --num_steps 5000 --num_buffers 50 --game 'Pong' --batch_size 128 --training_option 2
+#python run_dt_atari.py --seed 123 --context_length 30 --epochs 5 --model_type 'reward_conditioned' --num_steps 500000 --num_buffers 50 --game 'Qbert' --batch_size 128 --training_option 0
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=123)
 parser.add_argument('--context_length', type=int, default=30)
@@ -39,7 +42,7 @@ parser.add_argument('--trajectories_per_buffer', type=int, default=10, help='Num
 parser.add_argument('--data_dir_prefix', type=str, default='./dqn_replay/')
 parser.add_argument('--result_path', type=str, default='./results/')
 parser.add_argument('--training_option', type=int, default=0)
-parser.add_argument('--attn_loss_ratio', type=float, default=0.2)
+parser.add_argument('--attn_loss_ratio', type=float, default=1.0)
 #parser.add_argument('--data_dir_prefix', type=str, default='/data/scyu/project/dt/decision-transformer/atari/datasets/')
 args = parser.parse_args()
 
