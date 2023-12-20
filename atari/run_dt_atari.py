@@ -43,6 +43,7 @@ parser.add_argument('--data_dir_prefix', type=str, default='./dqn_replay/')
 parser.add_argument('--result_path', type=str, default='./results/')
 parser.add_argument('--training_option', type=int, default=0)
 parser.add_argument('--attn_loss_ratio', type=float, default=1.0)
+parser.add_argument('--aug_type', type=str, default='cutout')
 #parser.add_argument('--data_dir_prefix', type=str, default='/data/scyu/project/dt/decision-transformer/atari/datasets/')
 args = parser.parse_args()
 
@@ -93,7 +94,7 @@ obss, actions, returns, done_idxs, rtgs, timesteps = create_dataset(args.num_buf
 # timesteps : np array (17003,)      timesteps[676] : 676, timesteps[677] : 0
 
 
-path = args.result_path + datetime.today().strftime("%Y%m%d_%H%M")
+path = args.result_path + datetime.today().strftime("%Y%m%d_%H%M") + "_" + args.game + '_' + str(args.seed) + '_' + str(args.training_option) + '_' + args.aug_type
 os.mkdir(path)
 
 with open(path + '/config.txt', 'w') as f:
@@ -119,7 +120,8 @@ epochs = args.epochs
 tconf = TrainerConfig(max_epochs=epochs, batch_size=args.batch_size, learning_rate=6e-4,
                       lr_decay=True, warmup_tokens=512*20, final_tokens=2*len(train_dataset)*args.context_length*3,
                       num_workers=4, seed=args.seed, model_type=args.model_type, game=args.game, max_timestep=max(timesteps),
-                      save_path=path, training_option = args.training_option, attn_loss_ratio=args.attn_loss_ratio)
+                      save_path=path, training_option = args.training_option, attn_loss_ratio=args.attn_loss_ratio,
+                      aug_type=args.aug_type)
 
 trainer = Trainer(model, train_dataset, None, tconf)
 

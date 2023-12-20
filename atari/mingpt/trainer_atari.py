@@ -79,6 +79,42 @@ class Trainer:
         # torch.save(raw_model.state_dict(), self.config.ckpt_path)
         torch.save(raw_model.state_dict(), self.config.save_path + '/' + str(epoch) + '.pth')
 
+    def _image_aug_rand_shift(self, x, y, r, t, training_option, padding_size=10):
+        if training_option == 0:
+            return x, y, r, t
+        else:
+            B, T, CHW = x.shape
+            imgs = x.reshape(B*T, 4, 84, 84).numpy()
+
+            n, c, h, w = imgs.shape
+
+            w1 = np.random.randint(0, 2 * padding_size, n)
+            h1 = np.random.randint(0, 2 * padding_size, n)
+
+            rand_shifts = np.zeros((n, c, h, w), dtype = imgs.dtype)
+
+            for i, (img, w11, h11) in enumerate(zip(imgs, w1, h1)):
+                
+                blank_img = np.zeros((c, h + 2 * padding_size, w + 2 * padding_size), dtype = imgs.dtype)
+                blank_img[:, padding_size:padding_size + h, padding_size:padding_size + w] = img.copy()
+
+                rnd = torch.rand((1,))
+                if rnd > 0.5:
+                    rand_shifts[i] = blank_img[:, h11 : h11 + h , w11 : w11 + w]
+                else:
+                    rand_shifts[i] = img.copy()
+                
+                
+            
+            rand_shifts = torch.from_numpy(rand_shifts)
+            
+            rand_shifts = rand_shifts.reshape(B, T, CHW)
+            x = torch.cat([x, rand_shifts], dim=0)
+            y = torch.cat([y, y], dim=0)
+            r = torch.cat([r, r], dim=0)
+            t = torch.cat([t, t], dim=0)
+            return x, y, r, t
+
     def _image_aug_cutout(self, x, y, r, t, training_option, min_cut=10,max_cut=30):
 
         """
@@ -173,9 +209,15 @@ class Trainer:
             pbar = tqdm(enumerate(loader), total=len(loader)) if is_train else enumerate(loader)
             for it, (x, y, r, t) in pbar:
 
-                    
-                x, y, r, t = self._image_aug_cutout(x, y, r, t, config.training_option, 10, 30)
+                
 
+                if config.aug_type == 'cutout':
+                    x, y, r, t = self._image_aug_cutout(x, y, r, t, config.training_option, 10, 30)
+                elif config.aug_type == 'random_shift':
+                    x, y, r, t = self._image_aug_rand_shift(x, y, r, t, config.training_option, 10)
+                else:
+                    raise NotImplementedError()
+                
                 # place data on the correct device
                 x = x.to(self.device)
                 y = y.to(self.device)
@@ -224,7 +266,7 @@ class Trainer:
         # best_loss = float('inf')
         
         best_return = -float('inf')
-
+        
         self.tokens = 0 # counter used for learning rate decay
         
         eval_ret = []
@@ -233,7 +275,7 @@ class Trainer:
             run_epoch('train', epoch_num=epoch)
             # if self.test_dataset is not None:
             #     test_loss = run_epoch('test')
-
+            
             # # supports early stopping based on the test loss, or just save always if no test set is provided
             # good_model = self.test_dataset is None or test_loss < best_loss
             # if self.config.ckpt_path is not None and good_model:

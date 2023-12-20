@@ -34,6 +34,15 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None, actions=N
     has quadratic complexity unlike an RNN that is only linear, and has a finite context window
     of block_size, unlike an RNN that has an infinite context window.
     """
+    # model : <class 'mingpt.model_atari.GPT'>
+    # x : torch.Tensor torch.Size([1, 1, 4, 84, 84])
+    # steps : 1
+    # temperature : 1.0
+    # sample : True
+    # top_k : none
+    # actions : none
+    # rtgs : 20
+    # timesteps : tensor([[[0]]], device='cuda:0')
     block_size = model.get_block_size()
     model.eval()
     for k in range(steps):

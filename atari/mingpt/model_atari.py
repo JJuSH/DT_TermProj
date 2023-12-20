@@ -222,6 +222,7 @@ class GPT(nn.Module):
 
     # state, action, and return
     def forward(self, states, actions, targets=None, rtgs=None, timesteps=None):
+        
         # states: (batch, block_size, 4*84*84)
         # actions: (batch, block_size, 1)
         # targets: (batch, block_size, 1)
@@ -284,7 +285,7 @@ class GPT(nn.Module):
         if targets is not None:
             loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         
-        if self.config.training_option == 2:
+        if attn.shape[0] > 1 and self.config.training_option == 2:
             
             half_batch_size = attn.shape[0] // 2
             #loss += self.config.attn_loss_ratio * torch.square(torch.sub(attn[:half_batch_size], attn[half_batch_size:])).mean()
